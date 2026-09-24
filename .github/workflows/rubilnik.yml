@@ -1,0 +1,51 @@
+# Кнопка рубильника в GitHub Actions.
+# Кладётся в репозиторий ViacheslavK9/claude-flags как .github/workflows/rubilnik.yml
+# Запуск: вкладка Actions -> Rubilnik -> Run workflow. Работает и с телефона,
+# компьютер и приложение Claude для этого не нужны.
+name: Rubilnik
+on:
+  workflow_dispatch:
+    inputs:
+      chto:
+        description: "on, off ili toggle"
+        required: false
+        default: "toggle"
+        type: choice
+        options: ["toggle", "on", "off"]
+permissions:
+  contents: write
+concurrency:
+  group: rubilnik
+  cancel-in-progress: false
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pereklyuchit flag mode.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WANT: ${{ inputs.chto }}
+        run: |
+          set -euo pipefail
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/mode.txt"
+          cur=$(curl -sS -f -H "Authorization: Bearer ${GH_TOKEN}" \
+                     -H "Accept: application/vnd.github+json" "${API}?ref=mode")
+          sha=$(printf '%s' "$cur" | jq -r '.sha')
+          now=$(printf '%s' "$cur" | jq -r '.content' | tr -d '\n' | base64 -d | tr -d '[:space:]')
+          case "${WANT:-toggle}" in
+            on)  next=on ;;
+            off) next=off ;;
+            *)   if [ "$now" = "on" ]; then next=off; else next=on; fi ;;
+          esac
+          echo "bylo: $now, stanet: $next"
+          if [ "$now" = "$next" ]; then
+            echo "znachenie uzhe takoe, zapis ne nuzhna"
+            exit 0
+          fi
+          body=$(jq -n --arg m "rubilnik: $now -> $next" \
+                       --arg c "$(printf '%s\n' "$next" | base64 -w0)" \
+                       --arg s "$sha" \
+                       '{message:$m, content:$c, sha:$s, branch:"mode"}')
+          curl -sS -f -X PUT -H "Authorization: Bearer ${GH_TOKEN}" \
+               -H "Accept: application/vnd.github+json" "$API" -d "$body" > /dev/null
+          echo "gotovo: $next"
