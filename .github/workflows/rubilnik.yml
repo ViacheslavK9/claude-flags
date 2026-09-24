@@ -2,16 +2,19 @@
 # Кладётся в репозиторий ViacheslavK9/claude-flags как .github/workflows/rubilnik.yml
 # Запуск: вкладка Actions -> Rubilnik -> Run workflow. Работает и с телефона,
 # компьютер и приложение Claude для этого не нужны.
+#
+# Значение probe добавлено 25.09 по предложению Helper: оно проверяет ВСЮ цепочку,
+# включая право записи, и при этом не трогает mode.txt и никого не выключает.
 name: Rubilnik
 on:
   workflow_dispatch:
     inputs:
       chto:
-        description: "on, off ili toggle"
+        description: "on, off, toggle ili probe (probe nichego ne vyklyuchaet)"
         required: false
         default: "toggle"
         type: choice
-        options: ["toggle", "on", "off"]
+        options: ["toggle", "on", "off", "probe"]
 permissions:
   contents: write
 concurrency:
@@ -32,6 +35,22 @@ jobs:
                      -H "Accept: application/vnd.github+json" "${API}?ref=mode")
           sha=$(printf '%s' "$cur" | jq -r '.sha')
           now=$(printf '%s' "$cur" | jq -r '.content' | tr -d '\n' | base64 -d | tr -d '[:space:]')
+          echo "mode.txt sejchas: $now"
+
+          if [ "${WANT:-toggle}" = "probe" ]; then
+            PAPI="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/alive/rubilnik-probe.txt"
+            psha=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
+                        -H "Accept: application/vnd.github+json" "${PAPI}?ref=main" | jq -r '.sha // empty')
+            body=$(jq -n --arg m "probe rubilnika" \
+                         --arg c "$(printf 'probe %s UTC, mode=%s\n' "$(date -u '+%Y-%m-%d %H:%M')" "$now" | base64 -w0)" \
+                         --arg s "$psha" \
+                         '{message:$m, content:$c, branch:"main"} + (if $s == "" then {} else {sha:$s} end)')
+            curl -sS -f -X PUT -H "Authorization: Bearer ${GH_TOKEN}" \
+                 -H "Accept: application/vnd.github+json" "$PAPI" -d "$body" > /dev/null
+            echo "probe zapisan v alive/rubilnik-probe.txt; mode.txt ne tronut"
+            exit 0
+          fi
+
           case "${WANT:-toggle}" in
             on)  next=on ;;
             off) next=off ;;
